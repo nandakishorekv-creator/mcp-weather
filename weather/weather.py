@@ -16,7 +16,7 @@ try:
     # Initialize FastMCP server
     mcp = FastMCP("weather")
     
-    # --- DEBUG 3 ---
+    # --- DEBUG---
     print("--- FastMCP INITIALIZED ---", file=sys.stderr)
 
 except Exception as e:
@@ -28,7 +28,7 @@ except Exception as e:
     sys.exit(1) # Exit with an error
 
 # --- Your code (unchanged) ---
-
+#checking git
 # Constants
 NWS_API_BASE = "https://api.weather.gov"
 USER_AGENT = "weather-app/1.0"
