@@ -1,0 +1,157 @@
+trigger:
+  branches:
+    include:
+      - '*'
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+- group: build.variables
+- name: disable.coverage.autogenerate
+  value: 'true '
+- name: MAVEN_CACHE_FOLDER
+  value: $(Pipeline.Workspace)/.m2/repository
+- name: MAVEN_OPTS
+  value: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)  -s $(muleSettingsFile.secureFilePath)'  
+- name: MAVEN_OPTS_BUILD
+  value: '-Dsecure.key=mule -Dmule.env=dev -DskipTests ' 
+#- name: MAVEN_OPTS_TEST_CUCUMBER
+#  value: '-Dtestfile=src/test/javarunner.TestRunner.java -Dsecure.key=mule -Dmule.env=dev -Dproject.version=1.0.0 '
+ 
+- name: MAVEN_OPTS_TEST_MUNIT
+  value: '-Dsecure.key=mule -Dmule.env=dev -Dproject.version=1.0.0 '  
+- name: PROJECT_NAME
+  value: $[variables.projectName] 
+- name: ANYPOINT_USERNAME
+  value: $[variables.anypointUsername]
+- name: ANYPOINT_PASSWORD
+  value: $[variables.anypointPassword]
+- name: MULE_ORG
+  value: $[variables.muleOrg]
+- name: MULE_ORG_ID
+  value: $[variables.muleOrgId]
+
+steps:
+- task: DownloadSecureFile@1
+  name: muleSettingsFile
+  displayName: 'Download Mulesoft Settings'
+  inputs:
+    secureFile: 'settings.xml'
+- script: |
+   npm install -g anypoint-cli   
+  displayName: 'Install Anypoint CLI'
+# - script: |
+#    npm install -g api-catalog-cli@latest  
+#   displayName: 'Install Anypoint Catalog CLI'
+# - script: |
+#    api-catalog update-descriptor
+
+
+#    api-catalog publish-asset --username=$(ANYPOINT_USERNAME) --password=$(ANYPOINT_PASSWORD) --organization='$(MULE_ORG_ID)'
+#   displayName: 'Publish Asset to Exchange'  
+- script: |
+   anypoint-cli --username=$(ANYPOINT_USERNAME) --password=$(ANYPOINT_PASSWORD) --organization='$(MULE_ORG)' governance api validate --rulesets ruleset.yaml  $(PROJECT_NAME).zip   
+  displayName: 'Api Governance Validation'
+#- script: rktracer -vs -on – *.sln
+#  displayName: "RKTracer ON"
+#- script: 'reportgenerator -reports:$(Agent.TempDirectory)/**/coverage.cobertura.xml -targetdir:$(Build.SourcesDirectory)/coverlet/reports -reporttypes:"Cobertura"'  
+ # displayName: 'Create reports'
+- script: dotnet tool install --tool-path tools dotnet-reportgenerator-globaltool --version 4.6.1
+  displayName: 'Install ReportGenerator tool'
+  continueOnError: true
+
+#- script: ./tools/reportgenerator "-reports:$(Agent.TempDirectory)/**/*.cobertura.xml" "-targetdir:$(Build.SourcesDirectory)/coverlet/reports" "-reporttypes:Cobertura;HtmlInline"
+      
+
+
+- task: Cache@2
+  inputs:
+    key: $(Build.SourcesDirectory)/pom.xml
+    path: $(MAVEN_CACHE_FOLDER)
+  displayName: Cache Maven local repo
+- task: SonarQubePrepare@7
+  inputs:
+    SonarQube: $(PROJECT_NAME)
+    scannerMode: 'Other'
+    extraProperties: |
+      # Additional properties that will be passed to the scanner,
+      # Put one key=value per line, example:
+      # sonar.exclusions=**/*.bin
+      sonar.projectKey=$(PROJECT_NAME)_$(PROJECT_NAME)
+
+
+
+- task: Maven@4
+  inputs:
+    mavenPomFile: 'pom.xml'
+    #publishJUnitResults: true
+    #testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    mavenOptions: '-Xmx3072m'
+    javaHomeOption: 'JDKVersion'
+    jdkVersionOption: '17'
+    jdkArchitectureOption: 'x64'
+    goals: 'test $(MAVEN_OPTS) $(MAVEN_OPTS_TEST_MUNIT)'
+    sqMavenPluginVersionChoice: 'pom'
+  continueOnError: false
+  displayName: Munit Test
+
+- task: Maven@4
+  inputs:
+    mavenPomFile: 'pom.xml'
+   # publishJUnitResults: true
+   # testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    mavenOptions: '-Xmx3072m'
+    javaHomeOption: 'JDKVersion'
+    jdkVersionOption: '17'
+    jdkArchitectureOption: 'x64'
+    goals: 'package $(MAVEN_OPTS) $(MAVEN_OPTS_BUILD)'
+    sonarQubeRunAnalysis: true
+    #isJacocoCoverageReportXML: true
+    sqMavenPluginVersionChoice: 'pom'
+  displayName: Maven Build
+- task: SonarQubePublish@7
+  inputs:
+    pollingTimeoutSec: '300'
+
+
+- task: CopyFiles@2
+  inputs:
+    Contents: '**/target/*.jar'
+    TargetFolder: $(Build.ArtifactStagingDirectory)
+    CleanTargetFolder: true
+    flattenFolders: true  
+
+#- task: reportgenerator@4
+ # inputs:
+  # reports: '**/rktracer.xml'
+   #targetdir: 'coveragereport'
+   #reporttypes: 'Cobertura;RKHtml;Badges'
+   #verbosity: Verbose
+- task: PublishTestResults@2
+  displayName: ReportGenerator
+  inputs:
+    reports: '$(Agent.TempDirectory)/**/*.cobertura.xml'
+    targetdir: '$(Build.SourcesDirectory)/coverlet/reports'
+    reporttypes: 'Cobertura;HtmlInline'
+    
+#- task: PublishTestResults@2
+  #inputs:
+    #testResultsFiles: '**/TEST-*.xml'
+   # codeCoverageTool: Cobertura
+    #summaryFileLocation: '$(Build.SourcesDirectory)/coverlet/reports/Cobertura.xml' 
+   # reportDirectory: coveragereport
+    #searchFolder: '$(System.DefaultWorkingDirectory)' # Optional
+   # mergeTestResults: true # Optional
+    #failTaskOnFailedTests: false # Optional
+    # testRunTitle: APIOPS-MUNIT
+    #buildPlatform: # Optional
+    #buildConfiguration: # Optional
+   # publishRunAttachments: true # Optional
+  #continueOnError: false
+  #displayName: Munit Publish Report
+
+
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: $(System.DefaultWorkingDirectory)
+    artifact: 'drop'
